@@ -1,5 +1,11 @@
 'use server'
 
+import { headers } from 'next/headers'
+import { Resend } from 'resend'
+import { buildEnquiryEmail, oneLine } from '@/lib/email/enquiry-email'
+import { FALLBACK_NAME, siteUrl } from '@/lib/site'
+import { getSettings } from '@/sanity/fetch'
+
 export type EnquiryField = 'name' | 'email' | 'subject' | 'message'
 
 export type EnquiryState = {
@@ -12,11 +18,16 @@ export type EnquiryState = {
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /**
- * Validates and receives an enquiry from the contact form.
+ * Validates an enquiry from the contact form and emails it with Resend.
  *
- * Delivery: until an email service is chosen, enquiries are written to the
- * server log. To send them by email, replace `deliver` with a call to your
- * provider (for example Resend), using a server-only API key.
+ * Environment (server-only):
+ *   RESEND_API_KEY      Resend API key
+ *   CONTACT_TO_EMAIL    where enquiries go (comma-separated for several)
+ *   CONTACT_FROM_EMAIL  sender address on a domain verified in Resend, e.g. hello@yourdomain.com.
+ *                       Shown as "<photographer> · Website". Without it, Resend's test sender is
+ *                       used, which only delivers to the address that owns the Resend account.
+ *   CONTACT_TIMEZONE    optional, e.g. Europe/London, for the "Received" time (default UTC).
+ * The email's design lives in lib/email/enquiry-email.ts.
  */
 export async function sendEnquiry(_prev: EnquiryState, formData: FormData): Promise<EnquiryState> {
   const read = (key: string) => String(formData.get(key) ?? '').trim()
@@ -41,6 +52,14 @@ export async function sendEnquiry(_prev: EnquiryState, formData: FormData): Prom
     return { status: 'error', message: 'Please check the highlighted fields.', errors, values }
   }
 
+  if (await tooManyRequests()) {
+    return {
+      status: 'error',
+      message: 'Too many messages in a short time. Please wait a few minutes, or write to the email address on this page.',
+      values,
+    }
+  }
+
   try {
     await deliver(values)
   } catch {
@@ -54,6 +73,70 @@ export async function sendEnquiry(_prev: EnquiryState, formData: FormData): Prom
   return { status: 'success' }
 }
 
+/* ---------- Delivery ---------- */
+
+/** Builds the sender: a bare address gets the site's name, e.g. "Salman · Website <hello@site.com>". */
+function sender(configured: string | undefined, fromName: string) {
+  const value = configured?.trim()
+  if (value && value.includes('<')) return value // already "Name <address>"
+  const address = value || 'onboarding@resend.dev' // Resend's test sender
+  return `${fromName.replace(/[<>"]/g, '')} <${address}>`
+}
+
 async function deliver(enquiry: Record<EnquiryField, string>) {
-  console.info('[enquiry]', JSON.stringify({ ...enquiry, receivedAt: new Date().toISOString() }))
+  const key = process.env.RESEND_API_KEY
+  const to = process.env.CONTACT_TO_EMAIL?.split(',').map((e) => e.trim()).filter(Boolean)
+
+  if (!key || !to?.length) {
+    // Never tell a visitor their message was sent when it wasn't.
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[enquiry] Email is not configured: set RESEND_API_KEY and CONTACT_TO_EMAIL.')
+      throw new Error('Email not configured')
+    }
+    console.info('[enquiry] Email not configured; logged instead:', JSON.stringify(enquiry))
+    return
+  }
+
+  const settings = await getSettings()
+  const email = buildEnquiryEmail(enquiry, {
+    siteName: settings?.photographerName ?? FALLBACK_NAME,
+    siteHost: siteUrl.replace(/^https?:\/\//, ''),
+    receivedAt: new Date(),
+  })
+
+  const { error } = await new Resend(key).emails.send({
+    from: sender(process.env.CONTACT_FROM_EMAIL, email.fromName),
+    to,
+    replyTo: oneLine(enquiry.email),
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+  })
+  if (error) {
+    console.error('[enquiry] Resend could not send:', error.name, error.message)
+    throw new Error('Send failed')
+  }
+}
+
+/* ---------- Basic flood protection ---------- */
+
+const WINDOW_MS = 10 * 60 * 1000
+const LIMIT = 5
+const recent = new Map<string, number[]>()
+
+/**
+ * At most 5 enquiries per 10 minutes from one address. Kept in memory, so it
+ * resets on deploys and isn't shared between server instances; it stops casual
+ * floods, not determined abuse.
+ */
+async function tooManyRequests() {
+  const h = await headers()
+  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip') || 'unknown'
+  const now = Date.now()
+  const times = (recent.get(ip) ?? []).filter((t) => now - t < WINDOW_MS)
+  if (times.length >= LIMIT) return true
+  times.push(now)
+  recent.set(ip, times)
+  if (recent.size > 5000) recent.clear()
+  return false
 }
