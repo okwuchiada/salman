@@ -81,10 +81,7 @@ export function buildEnquiryEmail(enquiry: Enquiry, opts: { siteName: string; si
     </table>
   </td></tr>
   ${paragraphs.map((p) => `<tr><td style="padding:0 0 14px;white-space:pre-wrap;">${escapeHtml(p)}</td></tr>`).join('\n  ')}
-  <tr><td style="padding:14px 0 0;">
-    <a href="${replyHref}" style="display:inline-block;background:${C.ink};color:${C.white};text-decoration:none;padding:13px 22px;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:bold;">Reply to ${escapeHtml(first)}</a>
-  </td></tr>
-  <tr><td style="padding:32px 0 0;">
+  <tr><td style="padding:18px 0 0;">
     <p style="margin:0;padding-top:14px;border-top:1px solid ${C.rule};font-size:12px;color:${C.muted};">Sent from the contact form on ${escapeHtml(opts.siteHost)}. Replying to this email answers ${escapeHtml(first)} directly.</p>
   </td></tr>
 </table>
