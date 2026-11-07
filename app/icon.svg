@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The Quiet Frame: a photograph hung off-centre with its wall label. Ink & Paper colours. -->
+  <style>
+    .wall { fill: #FBFAF7; }
+    .photo { fill: #1A2230; }
+    .label { fill: #2E4A78; }
+    .label2 { fill: #878D99; }
+    @media (prefers-color-scheme: dark) {
+      .wall { fill: #10141B; }
+      .photo { fill: #EEF0F3; }
+      .label { fill: #8FA9D6; }
+      .label2 { fill: #6E7684; }
+    }
+  </style>
+  <rect class="wall" width="32" height="32" />
+  <rect class="photo" x="13" y="5" width="14" height="18" />
+  <rect class="label2" x="5" y="17.5" width="4" height="1.5" />
+  <rect class="label" x="5" y="21" width="6" height="2" />
+</svg>
